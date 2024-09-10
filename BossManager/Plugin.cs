@@ -4,6 +4,7 @@ using TShockAPI;
 using Mono.Cecil.Cil;
 using Newtonsoft.Json;
 using MonoMod.Cil;
+using TShockAPI.Hooks;
 
 namespace BossManager
 {
@@ -16,11 +17,7 @@ namespace BossManager
             IL.Terraria.NPC.SpawnWOF += OnSpawnWOF;
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.NetGetData.Register(this, OnNetGetData);
-
-            Commands.ChatCommands.Add(new Command("bossmgr.reload", ReloadCommand, "bossrel")
-            {
-                HelpText = "Reload Boss Manager."
-            });
+            GeneralHooks.ReloadEvent += OnReload;
 
             Commands.ChatCommands.Add(new Command("bossmgr.undoboss", UndoBossCommand, "undoboss", "uboss")
             {
@@ -140,7 +137,7 @@ namespace BossManager
                 csr.Emit(OpCodes.Ldarg_3);
                 csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
                 csr.Emit(OpCodes.Ldc_I4_2);
-                csr.Emit(OpCodes.Bne_Un_S, passedTheCheck);
+                csr.Emit(OpCodes.Bne_Un_S, isNotEnoughPlayers);
                 csr.Emit(OpCodes.Ldarg_0);
                 csr.Emit(OpCodes.Ldarg_3);
                 csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotEnoughPlayers)));
@@ -155,7 +152,7 @@ namespace BossManager
                 csr.Emit(OpCodes.Ldarg_3);
                 csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
                 csr.Emit(OpCodes.Ldc_I4_3);
-                csr.Emit(OpCodes.Bne_Un_S, passedTheCheck);
+                csr.Emit(OpCodes.Bne_Un_S, isNotAllowed);
                 csr.Emit(OpCodes.Ldarg_0);
                 csr.Emit(OpCodes.Ldarg_3);
                 csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotAllowed)));
@@ -242,106 +239,6 @@ namespace BossManager
             csr.MarkLabel(passedTheCheck);
         }
 
-/*        private void OnNewNPC(ILContext ctx)
-        {
-            TShock.Log.ConsoleInfo("[BossMGR]: Patching NPC.NewNPC()...");
-            try
-            {
-                //Create a new il cursor and currently pointing at index 0.
-                ILCursor csr = new ILCursor(ctx);
-                //We will change cursor's index to where we want to add our code.
-                csr.GotoNext(MoveType.Before, i => i.MatchCall<NPC>(nameof(NPC.GetAvailableNPCSlot)));
-                //There should be another way to move the cursor to where we want rather than hardcode,
-                //but rest assured, i don't think Relogic would change the implementation of GetAvailableNPCSlot()
-                csr.Index -= 2;
-                //Exit the current label which is the Main.getGoodWorld condition so this hook will work for every type of world.
-                csr.MoveAfterLabels();
-                //Define a new label, this new label is currently pointing to ldarg.3 opcode. This opcode is a must for GetAvailableNPCSlot(),
-                //we will inject our code above that method. 
-                ILLabel isIllegalSpawning = csr.DefineLabel();
-                //Push Type (aka NPC netID) to stack
-                csr.Emit(OpCodes.Ldarg_3);
-                //Call IsBossSpawnable() and it will use Type in stack for its argument
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
-                //Push 1 to stack, 1 = BossSpawnAttemptResultState.IllegalSpawning
-                csr.Emit(OpCodes.Ldc_I4_1);
-                //Compare the result of IsBossSpawnable() with 1. If they are not equal, proceed jumping to the
-                //isIllegalSpawning label which will call GetAvailableNPCSlot() and normally spawn the boss.
-                csr.Emit(OpCodes.Bne_Un_S, isIllegalSpawning);
-                //Push Type to stack
-                csr.Emit(OpCodes.Ldarg_3);
-                //Push 127 (Skeletron Prime) to stack
-                csr.Emit(OpCodes.Ldc_I4, 127);
-                //Compare if 2 values are equal
-                csr.Emit(OpCodes.Bne_Un_S, isIllegalSpawning);
-                csr.Emit(OpCodes.Ldsfld, typeof(Main).GetField(nameof(Main.zenithWorld)));
-                csr.Emit(OpCodes.Brtrue_S, isIllegalSpawning);
-                //If they are equal, push Type to stack
-                csr.Emit(OpCodes.Ldarg_3);
-                //Push 255 to stack as well
-                csr.Emit(OpCodes.Ldc_I4, 255);
-                //Call AnnounceIllegalSpawning(), this method will use 2 values we pushed above for its arguments
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceIllegalSpawning)));
-                //Push IEntitySource to stack
-                csr.Emit(OpCodes.Ldarg_0);
-                //Push Type to stack
-                csr.Emit(OpCodes.Ldarg_3);
-                //Call GiveBackSummoningItem(), uses 2 values we pushed earlier to give back the summoning item if the source is IEntitySource_BossSpawn
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
-                //Push 200 to stack
-                csr.Emit(OpCodes.Ldc_I4, 200);
-                //Return 200 so that the boss will not be spawned and the rest of NPC.NewNPC() will not be executed.
-                csr.Emit(OpCodes.Ret);
-                //Finally, set the label's target to the next position to exit the current label and ready to create a new label for another case.
-                csr.MarkLabel(isIllegalSpawning);
-
-                //Create new label for next case. Pretty much do the same as above
-                ILLabel isNotEnoughPlayers = csr.DefineLabel();
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
-                csr.Emit(OpCodes.Ldc_I4_2);
-                csr.Emit(OpCodes.Bne_Un_S, isNotEnoughPlayers);
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Ldc_I4, 127);
-                csr.Emit(OpCodes.Bne_Un_S, isNotEnoughPlayers);
-                csr.Emit(OpCodes.Ldsfld, typeof(Main).GetField(nameof(Main.zenithWorld)));
-                csr.Emit(OpCodes.Brtrue_S, isNotEnoughPlayers);
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Ldc_I4, 255);
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotEnoughPlayers)));
-                csr.Emit(OpCodes.Ldarg_0);
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
-                csr.Emit(OpCodes.Ldc_I4, 200);
-                csr.Emit(OpCodes.Ret);
-                csr.MarkLabel(isNotEnoughPlayers);
-
-                ILLabel isNotAllowed = csr.DefineLabel();
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
-                csr.Emit(OpCodes.Ldc_I4_3);
-                csr.Emit(OpCodes.Bne_Un_S, isNotAllowed);
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Ldc_I4, 127);
-                csr.Emit(OpCodes.Bne_Un_S, isNotAllowed);
-                csr.Emit(OpCodes.Ldsfld, typeof(Main).GetField(nameof(Main.zenithWorld)));
-                csr.Emit(OpCodes.Brtrue_S, isNotAllowed);
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Ldc_I4, 255);
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotAllowed)));
-                csr.Emit(OpCodes.Ldarg_0);
-                csr.Emit(OpCodes.Ldarg_3);
-                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
-                csr.Emit(OpCodes.Ldc_I4, 200);
-                csr.Emit(OpCodes.Ret);
-                csr.MarkLabel(isNotAllowed);
-            }
-            catch (Exception e)
-            {
-                TShock.Log.ConsoleError("[BossMGR]: Failed patching NPC.NewNPC(). Please report the issue to BossManager's maintainers or create an issue on BossMGR's Github.");
-            }
-        }*/
-
         private void OnSpawnWOF(ILContext ctx)
         {
             //WOF has an exclusive spawning method so his spawn message will still be shown up even though we successfully prevented him from spawning.
@@ -356,12 +253,16 @@ namespace BossManager
 
         private void OnJoin(JoinEventArgs args)
         {
-            if (Config.AllowJoinDuringBoss) return;
+            if (Config.AllowJoinDuringBoss) 
+                return;
 
             for (int i = 0; i < Main.maxNPCs; i++)
             {
                 if (Main.npc[i].active && Main.npc[i].boss)
+                {
                     TShock.Players[args.Who].Disconnect("The in-game players must defeat the current boss\nbefore you can join.");
+                    return;
+                }
             }
         }
 
@@ -406,6 +307,12 @@ namespace BossManager
             }
         }
 
+        private void OnReload(ReloadEventArgs args)
+        {
+            Config = Config.Read();
+            args.Player.SendInfoMessage("BossManager has been reloaded.");
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -414,20 +321,14 @@ namespace BossManager
                 IL.Terraria.NPC.SpawnWOF -= OnSpawnWOF;
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
                 ServerApi.Hooks.NetGetData.Deregister(this, OnNetGetData);
+                GeneralHooks.ReloadEvent -= OnReload;
             }
 
             base.Dispose(disposing);
         }
 
-        private void ReloadCommand(CommandArgs args)
-        {
-            Config = Config.Read();
-            args.Player.SendInfoMessage("BossManager has been reloaded.");
-        }
-
         private void ListBossCommand(CommandArgs args)
         {
-
             var BossList = new List<string>();
             {
                 if (NPC.downedSlimeKing)
@@ -539,6 +440,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set King Slime as {(NPC.downedSlimeKing ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "eyeofcthulhu":
                 case "eye":
                 case "eoc":
@@ -547,6 +449,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Eye of Cthulhu as {(NPC.downedBoss1 ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "evilboss":
                 case "boc":
                 case "eow":
@@ -559,13 +462,16 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set {(WorldGen.crimson ? "Brain of Cthulhu" : "Eater of Worlds")} as {(NPC.downedBoss2 ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
-                case "deer":
+
                 case "deerclops":
+                case "deer":
+                case "dc":
                     {
                         NPC.downedDeerclops = !NPC.downedDeerclops;
                         args.Player.SendInfoMessage($"Set Deerclops as {(NPC.downedDeerclops ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "skeletron":
                 case "sans":
                     {
@@ -573,6 +479,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Skeletron as {(NPC.downedBoss3 ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "queenbee":
                 case "qb":
                     {
@@ -580,6 +487,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Queen Bee as {(NPC.downedQueenBee ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "hardmode":
                 case "wallofflesh":
                 case "wof":
@@ -589,6 +497,7 @@ namespace BossManager
                         args.Player.SendInfoMessage("Note: This is the same as the '/hardmode' command.");
                         return;
                     }
+
                 case "queenslime":
                 case "qs":
                     {
@@ -596,6 +505,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Queen Slime as {(NPC.downedQueenSlime ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "mech1":
                 case "thedestroyer":
                 case "destroyer":
@@ -604,6 +514,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set The Destroyer as {(NPC.downedMechBoss1 ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "mech2":
                 case "thetwins":
                 case "twins":
@@ -612,6 +523,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set The Twins as {(NPC.downedMechBoss2 ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "mech3":
                 case "skeletronprime":
                 case "prime":
@@ -620,18 +532,21 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Skeletron Prime as {(NPC.downedMechBoss3 ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "plantera":
                     {
                         NPC.downedPlantBoss = !NPC.downedPlantBoss;
                         args.Player.SendInfoMessage($"Set Plantera as {(NPC.downedPlantBoss ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "golem":
                     {
                         NPC.downedGolemBoss = !NPC.downedGolemBoss;
                         args.Player.SendInfoMessage($"Set Golem as {(NPC.downedGolemBoss ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "duke":
                 case "fishron":
                 case "dukefishron":
@@ -640,6 +555,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Duke Fishron as {(NPC.downedFishron ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "cultist":
                 case "lunatic":
                 case "lunaticcultist":
@@ -657,6 +573,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Empress of Light as {(NPC.downedEmpressOfLight ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 case "moonlord":
                 case "ml":
                     {
@@ -664,6 +581,7 @@ namespace BossManager
                         args.Player.SendInfoMessage($"Set Moonlord as {(NPC.downedMoonlord ? "[c/FF0000:Killed]" : "[c/00FF00:Not Killed]")}!");
                         return;
                     }
+
                 default:
                     {
                         args.Player.SendErrorMessage("Please specify which boss to toggle!");
@@ -683,13 +601,13 @@ namespace BossManager
                 case "kingslime":
                 case "king":
                 case "ks":
-                    ToggleBoss(Config.AllowKingSlime, args, "King Slime");
+                    ToggleBoss(ref Config.AllowKingSlime, args, "King Slime");
                     return;
 
                 case "eyeofcthulhu":
                 case "eye":
                 case "eoc":
-                    ToggleBoss(Config.AllowEyeOfCthulhu, args, "Eye of Cthulhu");
+                    ToggleBoss(ref Config.AllowEyeOfCthulhu, args, "Eye of Cthulhu");
                     return;
 
                 case "evilboss":
@@ -699,82 +617,83 @@ namespace BossManager
                 case "brainofcthulhu":
                 case "brain":
                 case "eater":
-                    ToggleBoss(Config.AllowEaterOfWorlds, args, WorldGen.crimson ? "Brain of Cthulhu" : "Eater of Worlds");
-                    ToggleBoss(Config.AllowBrainOfCthulhu, args, "Brain of Cthulhu");
+                    ToggleBoss(ref Config.AllowEaterOfWorlds, args, WorldGen.crimson ? "Brain of Cthulhu" : "Eater of Worlds");
+                    ToggleBoss(ref Config.AllowBrainOfCthulhu, args, "Brain of Cthulhu");
                     return;
 
+                case "dst":
                 case "deerclops":
                 case "deer":
                 case "dc":
-                    ToggleBoss(Config.AllowDeerclops, args, "Deerclops");
+                    ToggleBoss(ref Config.AllowDeerclops, args, "Deerclops");
                     return;
 
                 case "skeletron":
                 case "sans":
-                    ToggleBoss(Config.AllowSkeletron, args, "Skeletron");
+                    ToggleBoss(ref Config.AllowSkeletron, args, "Skeletron");
                     return;
 
                 case "queenbee":
                 case "qb":
-                    ToggleBoss(Config.AllowQueenBee, args, "Queen Bee");
+                    ToggleBoss(ref Config.AllowQueenBee, args, "Queen Bee");
                     return;
 
                 case "hardmode":
                 case "wallofflesh":
                 case "wof":
-                    ToggleBoss(Config.AllowWallOfFlesh, args, "Wall of Flesh/Hardmode");
+                    ToggleBoss(ref Config.AllowWallOfFlesh, args, "Wall of Flesh/Hardmode");
                     return;
 
                 case "queenslime":
                 case "qs":
-                    ToggleBoss(Config.AllowQueenSlime, args, "Queen Slime");
+                    ToggleBoss(ref Config.AllowQueenSlime, args, "Queen Slime");
                     return;
 
                 case "twins":
                 case "thetwins":
                 case "ret":
                 case "spaz":
-                    ToggleBoss(Config.AllowTheTwins, args, "The Twins");
+                    ToggleBoss(ref Config.AllowTheTwins, args, "The Twins");
                     return;
 
                 case "destroyer":
                 case "thedestroyer":
-                    ToggleBoss(Config.AllowTheDestroyer, args, "The Destroyer");
+                    ToggleBoss(ref Config.AllowTheDestroyer, args, "The Destroyer");
                     return;
 
                 case "skeletronprime":
                 case "prime":
-                    ToggleBoss(Config.AllowSkeletronPrime, args, "Skeletron Prime");
+                    ToggleBoss(ref Config.AllowSkeletronPrime, args, "Skeletron Prime");
                     return;
                 case "plantera":
-                    ToggleBoss(Config.AllowPlantera, args, "Plantera");
+                    ToggleBoss(ref Config.AllowPlantera, args, "Plantera");
                     return;
                 case "golem":
-                    ToggleBoss(Config.AllowGolem, args, "Golem");
+                    ToggleBoss(ref Config.AllowGolem, args, "Golem");
                     return;
 
                 case "duke":
                 case "fishron":
                 case "dukefishron":
-                    ToggleBoss(Config.AllowDukeFishron, args, "Duke Fishron");
+                    ToggleBoss(ref Config.AllowDukeFishron, args, "Duke Fishron");
                     return;
 
                 case "eol":
                 case "empress":
                 case "empressoflight":
-                    ToggleBoss(Config.AllowEmpressOfLight, args, "Empress of Light");
+                    ToggleBoss(ref Config.AllowEmpressOfLight, args, "Empress of Light");
                     return;
 
                 case "cultist":
                 case "lunatic":
                 case "lunaticcultist":
-                    ToggleBoss(Config.AllowLunaticCultist, args, "Lunatic Cultist");
+                    ToggleBoss(ref Config.AllowLunaticCultist, args, "Lunatic Cultist");
                     return;
 
                 case "moonlord":
                 case "ml":
                 case "squid":
-                    ToggleBoss(Config.AllowMoonLord, args, "Moonlord");
+                    ToggleBoss(ref Config.AllowMoonLord, args, "Moonlord");
                     return;
 
                 // Add other cases here...
@@ -785,7 +704,7 @@ namespace BossManager
                     return;
             }
 
-            void ToggleBoss(bool configField, CommandArgs args, string bossName)
+            void ToggleBoss(ref bool configField, CommandArgs args, string bossName)
             {
                 configField = !configField;
                 SaveConfigToFile(Config, Path.Combine(TShock.SavePath, "BossManager.json"));

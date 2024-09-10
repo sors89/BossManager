@@ -9,7 +9,6 @@ namespace BossManager
         public override Version Version => new(1, 5, 0);
         public override string Author => "Ozz5581 & Soofa & Sors";
         public override string Description => "Controls boss spawning requirements.";
-
         public Plugin(Main game) : base(game) { }
 
         private static Config Config = Config.Read();

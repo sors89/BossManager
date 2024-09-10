@@ -31,7 +31,6 @@ namespace BossManager
 
         public static Config Read()
         {
-
             string path = Path.Combine(TShock.SavePath, "BossManager.json");
             if (!File.Exists(path))
             {
