@@ -1,0 +1,88 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\TShockPlugins\\BossManager\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|d:\\tshockplugins\\bossmanager\\bossmanager\\plugin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|solutionrelative:bossmanager\\plugin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|d:\\tshockplugins\\bossmanager\\bossmanager\\config.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|solutionrelative:bossmanager\\config.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|d:\\tshockplugins\\bossmanager\\bossmanager\\plugin.information.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|solutionrelative:bossmanager\\plugin.information.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|d:\\tshockplugins\\bossmanager\\bossmanager\\utils.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{482BB455-FA25-468C-9883-AC90CC52E08F}|BossManager\\BossManager.csproj|solutionrelative:bossmanager\\utils.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 3,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "Plugin.Information.cs",
+              "DocumentMoniker": "D:\\TShockPlugins\\BossManager\\BossManager\\Plugin.Information.cs",
+              "RelativeDocumentMoniker": "BossManager\\Plugin.Information.cs",
+              "ToolTip": "D:\\TShockPlugins\\BossManager\\BossManager\\Plugin.Information.cs",
+              "RelativeToolTip": "BossManager\\Plugin.Information.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAUAAAAwAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2024-09-03T13:41:15.961Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "Utils.cs",
+              "DocumentMoniker": "D:\\TShockPlugins\\BossManager\\BossManager\\Utils.cs",
+              "RelativeDocumentMoniker": "BossManager\\Utils.cs",
+              "ToolTip": "D:\\TShockPlugins\\BossManager\\BossManager\\Utils.cs",
+              "RelativeToolTip": "BossManager\\Utils.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAKoAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2024-09-03T08:33:10.325Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "Config.cs",
+              "DocumentMoniker": "D:\\TShockPlugins\\BossManager\\BossManager\\Config.cs",
+              "RelativeDocumentMoniker": "BossManager\\Config.cs",
+              "ToolTip": "D:\\TShockPlugins\\BossManager\\BossManager\\Config.cs",
+              "RelativeToolTip": "BossManager\\Config.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABYAAAAfAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2024-09-03T08:40:44.985Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Plugin.cs",
+              "DocumentMoniker": "D:\\TShockPlugins\\BossManager\\BossManager\\Plugin.cs",
+              "RelativeDocumentMoniker": "BossManager\\Plugin.cs",
+              "ToolTip": "D:\\TShockPlugins\\BossManager\\BossManager\\Plugin.cs",
+              "RelativeToolTip": "BossManager\\Plugin.cs",
+              "ViewState": "AgIAAHAAAAAAAAAAAAAAAEUAAAAQAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2024-09-03T03:44:59.441Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

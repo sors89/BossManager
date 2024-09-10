@@ -1,10 +1,9 @@
-﻿using TerrariaApi.Server;
+﻿using Terraria;
+using TerrariaApi.Server;
 using TShockAPI;
-using Terraria;
-using Terraria.ID;
+using Mono.Cecil.Cil;
 using Newtonsoft.Json;
-using Microsoft.Xna.Framework;
-using Terraria.Localization;
+using MonoMod.Cil;
 
 namespace BossManager
 {
@@ -13,11 +12,10 @@ namespace BossManager
     {
         public override void Initialize()
         {
-            ServerApi.Hooks.NpcSpawn.Register(this, OnNpcSpawn);
+            IL.Terraria.NPC.NewNPC += OnNewNPC;
+            IL.Terraria.NPC.SpawnWOF += OnSpawnWOF;
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
-            ServerApi.Hooks.ServerBroadcast.Register(this, OnServerBroadcast);
-
-            GetDataHandlers.PlayerUpdate += OnPlayerUpdate;
+            ServerApi.Hooks.NetGetData.Register(this, OnNetGetData);
 
             Commands.ChatCommands.Add(new Command("bossmgr.reload", ReloadCommand, "bossrel")
             {
@@ -40,37 +38,369 @@ namespace BossManager
             });
         }
 
-        private void OnPlayerUpdate(object? sender, GetDataHandlers.PlayerUpdateEventArgs args)
+        private void OnNewNPC(ILContext ctx)
         {
-            TSPlayer plr = args.Player;
-            if (args.Control.IsUsingItem && IsSpawnerItem(plr.SelectedItem))
-            {
-                if (!IsBossSpawnable(GetBossNetIDFromSpawner(plr.SelectedItem.netID)))
-                {
-                    plr.SendErrorMessage("This boss is disabled!");
+            //We are gonna patch Terraria's NPC.NewNPC() to prevent bosses from spawning by using IL editing.
+            //IL editing is a powerful (and painful) way to inject our code into Terraria's code. Thus change how it works,
+            //but IL editing will not work for all hooks in multiplayer and any plugins that use the same method you patched will also be affected when this plugin is running.
+            //If you wanna learn more about IL editing: https://github.com/tModLoader/tModLoader/wiki/Expert-IL-Editing
+            //I suggest taking a look at NPC.NewNPC() code in dnSpy to have a better understanding what i'm talking about below.
 
-                    NetMessage.SendData((int)PacketTypes.PlayerSlot, -1, -1, NetworkText.FromLiteral(plr.SelectedItem.Name), plr.Index, plr.TPlayer.selectedItem);
-                    NetMessage.SendData((int)PacketTypes.PlayerSlot, plr.Index, -1, NetworkText.FromLiteral(plr.SelectedItem.Name), plr.Index, plr.TPlayer.selectedItem);
-                }
+            //Important Note: We will let Mechdusa bypass the IsBossSpawnable() in this hook because if we didn't, there would be
+            //an error which is really hard to fix, its much easier to let packet 61 handle Mechdusa spawn.
+
+            TShock.Log.ConsoleInfo("[BossMGR]: Patching NPC.NewNPC()...");
+            //Create a new IL cursor that pointing at index 0
+            ILCursor csr = new ILCursor(ctx);
+            //Finding the index of NPC.GetAvailableNPCSlot()
+            csr.GotoNext(MoveType.Before, i => i.MatchCall<NPC>(nameof(NPC.GetAvailableNPCSlot)));
+            //Adjust the index to where we want to inject our code
+            csr.Index -= 2;
+            //Escape the Main.getGoodWorld condition or this hook would only work in ftw world
+            csr.MoveAfterLabels();
+            //We will try to inject the code below:
+
+            /*
+            if (Type != 127 && Type != 125 && Type != 126 && Type != 134)
+                IsBossSpawnable(Type)...
+            else
+            {
+                if (Main.zenithWorld)
+                    Let them spawn
+                else
+                    IsBossSpawnable(Type)...
+            }
+            */
+
+            //Create a new label, remember that the cursor is now pointing at Ldarg.3 Opcode which is used for NPC.GetAvaliableNPCSlot()
+            //because of that, we will use this label to jump to that method if the IsBossSpawnable() return 0 (Success)
+            ILLabel passedTheCheck = csr.DefineLabel();
+            //Also create a new label, the purpose of this label is we are gonna use it to jump to the first else statement
+            //in the code above. This label's position is also pointing at Ldarg.3 Opcode.
+            ILLabel jumpToElseStatement = csr.DefineLabel();
+            //Push Type (aka NPCID) into stack
+            csr.Emit(OpCodes.Ldarg_3);
+            //Push 127 (Skeletron Prime's ID) into stack 
+            csr.Emit(OpCodes.Ldc_I4, 127);
+            //Compare if these 2 values are equal, proceed jumping to the first else statement
+            csr.Emit(OpCodes.Beq_S, jumpToElseStatement);
+            //Push Type into stack
+            csr.Emit(OpCodes.Ldarg_3);
+            //Push 125 (Retinazer's ID) into stack
+            csr.Emit(OpCodes.Ldc_I4, 125);
+            //Compare if these 2 values are equal, proceed jumping to the first else statement
+            csr.Emit(OpCodes.Beq_S, jumpToElseStatement);
+            //Push Type into stack
+            csr.Emit(OpCodes.Ldarg_3);
+            //Push 126 (Spazmatism's ID) into stack
+            csr.Emit(OpCodes.Ldc_I4, 126);
+            //Compare if these 2 values are equal, proceed jumping to the first else statement
+            csr.Emit(OpCodes.Beq_S, jumpToElseStatement);
+            //Push Type into stack
+            csr.Emit(OpCodes.Ldarg_3);
+            //Push 134 (Destroyer's ID) into stack
+            csr.Emit(OpCodes.Ldc_I4, 134);
+            //Compare if these 2 values are equal, proceed jumping to the first else statement
+            csr.Emit(OpCodes.Beq_S, jumpToElseStatement);
+
+            //If they are not equal, procceed execute the code inside if statement
+            //Brackets here because i couldn't think of any other variable name
+            {
+                //Create a new label, this label's current position is at the Opcode after the Beq_S Opcode
+                ILLabel isIllegalSpawning = csr.DefineLabel();
+                //Push Type into stack
+                csr.Emit(OpCodes.Ldarg_3);
+                //Call IsBossSpawnable() and push the return value into stack
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                //Push 1 into stack, 1 = BossSpawnAttemptResultState.IllegalSpawning
+                csr.Emit(OpCodes.Ldc_I4_1);
+                //Compare if these 2 values are not equal, proceed jump to the next check
+                csr.Emit(OpCodes.Bne_Un_S, isIllegalSpawning);
+                //If they are equal, that means it is an illegal spawning, push IEntitySource into stack
+                csr.Emit(OpCodes.Ldarg_0);
+                //Push Type into stack
+                csr.Emit(OpCodes.Ldarg_3);
+                //Call AnnounceIllegalSpawning(), uses 2 values we pushed for its arguments
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceIllegalSpawning)));
+                //Push IEntitySource into stack again
+                csr.Emit(OpCodes.Ldarg_0);
+                //Push Type into stack
+                csr.Emit(OpCodes.Ldarg_3);
+                //Call GiveBackSummoningItem(), uses 2 values we pushed for its arguments
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                //Push 200 into stack
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                //Return 200 because plugin rejected boss spawning
+                csr.Emit(OpCodes.Ret);
+                //Set the label's stream position to the next cursor's position, mark it as the end of the first case.
+                csr.MarkLabel(isIllegalSpawning);
+
+                //Next case: NotEnoughPlayers, pretty much do the same as above.
+                ILLabel isNotEnoughPlayers = csr.DefineLabel();
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                csr.Emit(OpCodes.Ldc_I4_2);
+                csr.Emit(OpCodes.Bne_Un_S, passedTheCheck);
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotEnoughPlayers)));
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                csr.Emit(OpCodes.Ret);
+                csr.MarkLabel(isNotEnoughPlayers);
+
+                ILLabel isNotAllowed = csr.DefineLabel();
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                csr.Emit(OpCodes.Ldc_I4_3);
+                csr.Emit(OpCodes.Bne_Un_S, passedTheCheck);
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotAllowed)));
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                csr.Emit(OpCodes.Ret);
+                csr.MarkLabel(isNotAllowed);
+            }
+
+            //After the check, the cursor position is now pointing to somewhere i don't know, but i pretty sure that it escaped
+            //the first if statement.
+            //Mark this as the end of the first if statement, now we are ready to create the first else statement
+            csr.MarkLabel(jumpToElseStatement);
+
+            //Create a new label to check if the current world is a zenith world or not, i don't know where is the cursor pointing at
+            //but i just need to know the cursor escaped the first if brackets
+            ILLabel notAZenithWorld = csr.DefineLabel();
+            //ILLabel jumpToNestedElseStatement = csr.DefineLabel();
+            //Load Main.zenithWorld into stack
+            csr.Emit(OpCodes.Ldsfld, typeof(Main).GetField(nameof(Main.zenithWorld)));
+            //Check if the current world is not zenith world, procceed jumping to where notAZenithWorld label is located and proceed
+            //to the nested else statement
+            csr.Emit(OpCodes.Brfalse_S, notAZenithWorld);
+            //If not, then we are sure that they are trying to summon Mechdusa or any other mech bosses except Skeletron Prime
+            //which is impossible to do unless they are hacking.
+            //Assume that they are not hacking, we will let Mechdusa bypass this hook only.
+            csr.Emit(OpCodes.Br_S, passedTheCheck);
+
+            //Set the location of notAZenithWorld label to the end of the nested if statement,
+            csr.MarkLabel(notAZenithWorld);
+            //Create a new label for nested else statement
+            ILLabel nestedElseStatement = csr.DefineLabel();
+            {
+                //IsBossSpawnable()...
+                ILLabel isIllegalSpawning = csr.DefineLabel();
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                csr.Emit(OpCodes.Ldc_I4_1);
+                csr.Emit(OpCodes.Bne_Un_S, isIllegalSpawning);
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceIllegalSpawning)));
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                csr.Emit(OpCodes.Ret);
+                csr.MarkLabel(isIllegalSpawning);
+
+                ILLabel isNotEnoughPlayers = csr.DefineLabel();
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                csr.Emit(OpCodes.Ldc_I4_2);
+                csr.Emit(OpCodes.Bne_Un_S, isNotEnoughPlayers);
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotEnoughPlayers)));
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                csr.Emit(OpCodes.Ret);
+                csr.MarkLabel(isNotEnoughPlayers);
+
+                ILLabel isNotAllowed = csr.DefineLabel();
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                csr.Emit(OpCodes.Ldc_I4_3);
+                csr.Emit(OpCodes.Bne_Un_S, isNotAllowed);
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotAllowed)));
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                csr.Emit(OpCodes.Ret);
+                csr.MarkLabel(isNotAllowed);
+            }
+
+            csr.MarkLabel(nestedElseStatement);
+            csr.MarkLabel(passedTheCheck);
+        }
+
+/*        private void OnNewNPC(ILContext ctx)
+        {
+            TShock.Log.ConsoleInfo("[BossMGR]: Patching NPC.NewNPC()...");
+            try
+            {
+                //Create a new il cursor and currently pointing at index 0.
+                ILCursor csr = new ILCursor(ctx);
+                //We will change cursor's index to where we want to add our code.
+                csr.GotoNext(MoveType.Before, i => i.MatchCall<NPC>(nameof(NPC.GetAvailableNPCSlot)));
+                //There should be another way to move the cursor to where we want rather than hardcode,
+                //but rest assured, i don't think Relogic would change the implementation of GetAvailableNPCSlot()
+                csr.Index -= 2;
+                //Exit the current label which is the Main.getGoodWorld condition so this hook will work for every type of world.
+                csr.MoveAfterLabels();
+                //Define a new label, this new label is currently pointing to ldarg.3 opcode. This opcode is a must for GetAvailableNPCSlot(),
+                //we will inject our code above that method. 
+                ILLabel isIllegalSpawning = csr.DefineLabel();
+                //Push Type (aka NPC netID) to stack
+                csr.Emit(OpCodes.Ldarg_3);
+                //Call IsBossSpawnable() and it will use Type in stack for its argument
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                //Push 1 to stack, 1 = BossSpawnAttemptResultState.IllegalSpawning
+                csr.Emit(OpCodes.Ldc_I4_1);
+                //Compare the result of IsBossSpawnable() with 1. If they are not equal, proceed jumping to the
+                //isIllegalSpawning label which will call GetAvailableNPCSlot() and normally spawn the boss.
+                csr.Emit(OpCodes.Bne_Un_S, isIllegalSpawning);
+                //Push Type to stack
+                csr.Emit(OpCodes.Ldarg_3);
+                //Push 127 (Skeletron Prime) to stack
+                csr.Emit(OpCodes.Ldc_I4, 127);
+                //Compare if 2 values are equal
+                csr.Emit(OpCodes.Bne_Un_S, isIllegalSpawning);
+                csr.Emit(OpCodes.Ldsfld, typeof(Main).GetField(nameof(Main.zenithWorld)));
+                csr.Emit(OpCodes.Brtrue_S, isIllegalSpawning);
+                //If they are equal, push Type to stack
+                csr.Emit(OpCodes.Ldarg_3);
+                //Push 255 to stack as well
+                csr.Emit(OpCodes.Ldc_I4, 255);
+                //Call AnnounceIllegalSpawning(), this method will use 2 values we pushed above for its arguments
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceIllegalSpawning)));
+                //Push IEntitySource to stack
+                csr.Emit(OpCodes.Ldarg_0);
+                //Push Type to stack
+                csr.Emit(OpCodes.Ldarg_3);
+                //Call GiveBackSummoningItem(), uses 2 values we pushed earlier to give back the summoning item if the source is IEntitySource_BossSpawn
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                //Push 200 to stack
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                //Return 200 so that the boss will not be spawned and the rest of NPC.NewNPC() will not be executed.
+                csr.Emit(OpCodes.Ret);
+                //Finally, set the label's target to the next position to exit the current label and ready to create a new label for another case.
+                csr.MarkLabel(isIllegalSpawning);
+
+                //Create new label for next case. Pretty much do the same as above
+                ILLabel isNotEnoughPlayers = csr.DefineLabel();
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                csr.Emit(OpCodes.Ldc_I4_2);
+                csr.Emit(OpCodes.Bne_Un_S, isNotEnoughPlayers);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Ldc_I4, 127);
+                csr.Emit(OpCodes.Bne_Un_S, isNotEnoughPlayers);
+                csr.Emit(OpCodes.Ldsfld, typeof(Main).GetField(nameof(Main.zenithWorld)));
+                csr.Emit(OpCodes.Brtrue_S, isNotEnoughPlayers);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Ldc_I4, 255);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotEnoughPlayers)));
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                csr.Emit(OpCodes.Ret);
+                csr.MarkLabel(isNotEnoughPlayers);
+
+                ILLabel isNotAllowed = csr.DefineLabel();
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(IsBossSpawnable)));
+                csr.Emit(OpCodes.Ldc_I4_3);
+                csr.Emit(OpCodes.Bne_Un_S, isNotAllowed);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Ldc_I4, 127);
+                csr.Emit(OpCodes.Bne_Un_S, isNotAllowed);
+                csr.Emit(OpCodes.Ldsfld, typeof(Main).GetField(nameof(Main.zenithWorld)));
+                csr.Emit(OpCodes.Brtrue_S, isNotAllowed);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Ldc_I4, 255);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(AnnounceNotAllowed)));
+                csr.Emit(OpCodes.Ldarg_0);
+                csr.Emit(OpCodes.Ldarg_3);
+                csr.Emit(OpCodes.Call, typeof(Plugin).GetMethod(nameof(GiveBackSummoningItem)));
+                csr.Emit(OpCodes.Ldc_I4, 200);
+                csr.Emit(OpCodes.Ret);
+                csr.MarkLabel(isNotAllowed);
+            }
+            catch (Exception e)
+            {
+                TShock.Log.ConsoleError("[BossMGR]: Failed patching NPC.NewNPC(). Please report the issue to BossManager's maintainers or create an issue on BossMGR's Github.");
+            }
+        }*/
+
+        private void OnSpawnWOF(ILContext ctx)
+        {
+            //WOF has an exclusive spawning method so his spawn message will still be shown up even though we successfully prevented him from spawning.
+            //This hook will disable WOF's spawn message, simply return immediately before the spawn message executed as NPC.NewNPC() did all the hard job for us.
+
+            TShock.Log.ConsoleInfo("[BossMGR]: Patching NPC.SpawnWOF()...");
+            ILCursor csr = new ILCursor(ctx);
+            csr.GotoNext(MoveType.After, i => i.MatchCall<NPC>(nameof(NPC.NewNPC)));
+            csr.Index++;
+            csr.Emit(OpCodes.Ret);
+        }
+
+        private void OnJoin(JoinEventArgs args)
+        {
+            if (Config.AllowJoinDuringBoss) return;
+
+            for (int i = 0; i < Main.maxNPCs; i++)
+            {
+                if (Main.npc[i].active && Main.npc[i].boss)
+                    TShock.Players[args.Who].Disconnect("The in-game players must defeat the current boss\nbefore you can join.");
             }
         }
 
-        private void OnServerBroadcast(ServerBroadcastEventArgs args)
+        private void OnNetGetData(GetDataEventArgs args)
         {
-            string text = args.Message.ToString();
-
-            if (text.EndsWith(" has awoken!"))
+            //This packet will only be fired when a player uses a boss summoning item.
+            //It will not be fired if a boss spawns naturally or through doing some various processes.
+            //So its safe to give back player the summoning item if the plugin rejects the boss spawning.
+            if (args.MsgID == PacketTypes.SpawnBossorInvasion)
             {
-                args.Message._mode = NetworkText.Mode.LocalizationKey;
-                text = args.Message.ToString();
-
-                string bossName = text[..text.IndexOf(" has awoken!")];
-
-                foreach (NPC npc in Main.npc)
+                using (BinaryReader br = new BinaryReader(new MemoryStream(args.Msg.readBuffer, args.Index, args.Length)))
                 {
-                    if (npc.FullName.StartsWith(bossName) && npc.type == 0 && !npc.active)
+                    short playerID = br.ReadInt16();
+                    short type = br.ReadInt16();
+
+                    if (type == -16) //Mechdusa
                     {
-                        args.Handled = true;
+                        switch (IsBossSpawnable(127))
+                        {
+                            case BossSpawnAttemptResultState.IllegalSpawning:
+                                AnnounceIllegalSpawning(NPC.GetBossSpawnSource(playerID), 127);
+                                TShock.Players[playerID].GiveItem(GetSummoningItemFromBossNetID(127), 1);
+                                args.Handled = true;
+                                return;
+                            case BossSpawnAttemptResultState.NotEnoughPlayers:
+                                AnnounceNotEnoughPlayers(NPC.GetBossSpawnSource(playerID), 127);
+                                TShock.Players[playerID].GiveItem(GetSummoningItemFromBossNetID(127), 1);
+                                args.Handled = true;
+                                return;
+                            case BossSpawnAttemptResultState.NotAllowed:
+                                AnnounceNotAllowed(NPC.GetBossSpawnSource(playerID), 127);
+                                TShock.Players[playerID].GiveItem(GetSummoningItemFromBossNetID(127), 1);
+                                args.Handled = true;
+                                return;
+
+                            default:
+                                args.Handled = false;
+                                return;
+                        }
                     }
                 }
             }
@@ -80,11 +410,10 @@ namespace BossManager
         {
             if (disposing)
             {
-                ServerApi.Hooks.NpcSpawn.Deregister(this, OnNpcSpawn);
+                IL.Terraria.NPC.NewNPC -= OnNewNPC;
+                IL.Terraria.NPC.SpawnWOF -= OnSpawnWOF;
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
-                ServerApi.Hooks.ServerBroadcast.Deregister(this, OnServerBroadcast);
-
-                GetDataHandlers.PlayerUpdate -= OnPlayerUpdate;
+                ServerApi.Hooks.NetGetData.Deregister(this, OnNetGetData);
             }
 
             base.Dispose(disposing);
@@ -94,17 +423,6 @@ namespace BossManager
         {
             Config = Config.Read();
             args.Player.SendInfoMessage("BossManager has been reloaded.");
-        }
-
-        public void OnJoin(JoinEventArgs args)
-        {
-            if (Config.AllowJoinDuringBoss) return;
-
-            for (int i = 0; i < Main.maxNPCs; i++)
-            {
-                if (Main.npc[i].active && Main.npc[i].boss)
-                    TShock.Players[args.Who].Disconnect("The in-game players must defeat the current boss\nbefore you can join.");
-            }
         }
 
         private void ListBossCommand(CommandArgs args)
@@ -365,14 +683,14 @@ namespace BossManager
                 case "kingslime":
                 case "king":
                 case "ks":
-                    ToggleBoss(ref Config.AllowKingSlime, args, "King Slime");
-                    break;
+                    ToggleBoss(Config.AllowKingSlime, args, "King Slime");
+                    return;
 
                 case "eyeofcthulhu":
                 case "eye":
                 case "eoc":
-                    ToggleBoss(ref Config.AllowEyeOfCthulhu, args, "Eye of Cthulhu");
-                    break;
+                    ToggleBoss(Config.AllowEyeOfCthulhu, args, "Eye of Cthulhu");
+                    return;
 
                 case "evilboss":
                 case "boc":
@@ -381,92 +699,93 @@ namespace BossManager
                 case "brainofcthulhu":
                 case "brain":
                 case "eater":
-                    ToggleBoss(ref Config.AllowEaterOfWorlds, args, WorldGen.crimson ? "Brain of Cthulhu" : "Eater of Worlds");
-                    ToggleBoss(ref Config.AllowBrainOfCthulhu, args, "Brain of Cthulhu");
-                    break;
+                    ToggleBoss(Config.AllowEaterOfWorlds, args, WorldGen.crimson ? "Brain of Cthulhu" : "Eater of Worlds");
+                    ToggleBoss(Config.AllowBrainOfCthulhu, args, "Brain of Cthulhu");
+                    return;
 
                 case "deerclops":
                 case "deer":
                 case "dc":
-                    ToggleBoss(ref Config.AllowDeerclops, args, "Deerclops");
-                    break;
+                    ToggleBoss(Config.AllowDeerclops, args, "Deerclops");
+                    return;
 
                 case "skeletron":
                 case "sans":
-                    ToggleBoss(ref Config.AllowSkeletron, args, "Skeletron");
-                    break;
+                    ToggleBoss(Config.AllowSkeletron, args, "Skeletron");
+                    return;
 
                 case "queenbee":
                 case "qb":
-                    ToggleBoss(ref Config.AllowQueenBee, args, "Queen Bee");
-                    break;
+                    ToggleBoss(Config.AllowQueenBee, args, "Queen Bee");
+                    return;
 
                 case "hardmode":
                 case "wallofflesh":
                 case "wof":
-                    ToggleBoss(ref Config.AllowWallOfFlesh, args, "Wall of Flesh/Hardmode");
-                    break;
+                    ToggleBoss(Config.AllowWallOfFlesh, args, "Wall of Flesh/Hardmode");
+                    return;
 
                 case "queenslime":
-                    ToggleBoss(ref Config.AllowQueenSlime, args, "Queen Slime");
-                    break;
+                case "qs":
+                    ToggleBoss(Config.AllowQueenSlime, args, "Queen Slime");
+                    return;
 
                 case "twins":
                 case "thetwins":
                 case "ret":
                 case "spaz":
-                    ToggleBoss(ref Config.AllowTheTwins, args, "The Twins");
-                    break;
+                    ToggleBoss(Config.AllowTheTwins, args, "The Twins");
+                    return;
 
                 case "destroyer":
                 case "thedestroyer":
-                    ToggleBoss(ref Config.AllowTheDestroyer, args, "The Destroyer");
-                    break;
+                    ToggleBoss(Config.AllowTheDestroyer, args, "The Destroyer");
+                    return;
 
                 case "skeletronprime":
                 case "prime":
-                    ToggleBoss(ref Config.AllowSkeletronPrime, args, "Skeletron Prime");
-                    break;
+                    ToggleBoss(Config.AllowSkeletronPrime, args, "Skeletron Prime");
+                    return;
                 case "plantera":
-                    ToggleBoss(ref Config.AllowPlantera, args, "Plantera");
-                    break;
+                    ToggleBoss(Config.AllowPlantera, args, "Plantera");
+                    return;
                 case "golem":
-                    ToggleBoss(ref Config.AllowGolem, args, "Golem");
-                    break;
+                    ToggleBoss(Config.AllowGolem, args, "Golem");
+                    return;
 
                 case "duke":
                 case "fishron":
                 case "dukefishron":
-                    ToggleBoss(ref Config.AllowDukeFishron, args, "Duke Fishron");
-                    break;
+                    ToggleBoss(Config.AllowDukeFishron, args, "Duke Fishron");
+                    return;
 
                 case "eol":
                 case "empress":
                 case "empressoflight":
-                    ToggleBoss(ref Config.AllowEmpressOfLight, args, "Empress of Light");
-                    break;
+                    ToggleBoss(Config.AllowEmpressOfLight, args, "Empress of Light");
+                    return;
 
                 case "cultist":
                 case "lunatic":
                 case "lunaticcultist":
-                    ToggleBoss(ref Config.AllowLunaticCultist, args, "Lunatic Cultist");
-                    break;
+                    ToggleBoss(Config.AllowLunaticCultist, args, "Lunatic Cultist");
+                    return;
 
                 case "moonlord":
                 case "ml":
                 case "squid":
-                    ToggleBoss(ref Config.AllowMoonLord, args, "Moonlord");
-                    break;
+                    ToggleBoss(Config.AllowMoonLord, args, "Moonlord");
+                    return;
 
                 // Add other cases here...
 
                 default:
                     args.Player.SendErrorMessage("Please specify boss to enable:");
                     args.Player.SendInfoMessage("Bosses have pre-set identifiers: eg, /enblb king, /enblb eoc, OR /enblb wof");
-                    break;
+                    return;
             }
 
-            void ToggleBoss(ref bool configField, CommandArgs args, string bossName)
+            void ToggleBoss(bool configField, CommandArgs args, string bossName)
             {
                 configField = !configField;
                 SaveConfigToFile(Config, Path.Combine(TShock.SavePath, "BossManager.json"));
@@ -497,227 +816,12 @@ namespace BossManager
 
         }
 
-        public void OnNpcSpawn(NpcSpawnEventArgs args)
+        public enum BossSpawnAttemptResultState
         {
-            NPC npc = Main.npc[args.NpcId];
-
-            if (!IsBossSpawnable(npc.netID))
-            {
-                if (Main.zenithWorld && npc.netID == NPCID.SkeletronPrime)
-                {
-                    npc.position = new Vector2(int.MinValue, int.MinValue);
-                    npc.velocity = new Vector2(int.MinValue, int.MinValue);
-                    TSPlayer.All.SendData(PacketTypes.NpcUpdate, number: args.NpcId);
-                }
-                else
-                {
-                    DespawnNpc(args.NpcId);
-                }
-            }
-        }
-
-        private void DespawnNpc(int index)
-        {
-            Main.npc[index].active = false;
-            Main.npc[index].type = 0;
-            TSPlayer.All.SendData(PacketTypes.NpcUpdate, "", index);
-        }
-
-        private bool IsSpawnerItem(Item item)
-        {
-            int[] spawnerIds = {
-                ItemID.SlimeCrown,
-                ItemID.SuspiciousLookingEye,
-                ItemID.WormFood,
-                ItemID.BloodySpine,
-                ItemID.Abeemination,
-                ItemID.DeerThing,
-                ItemID.QueenSlimeCrystal,
-                ItemID.MechanicalWorm,
-                ItemID.MechanicalEye,
-                ItemID.MechanicalSkull,
-                ItemID.MechdusaSummon,
-                ItemID.LihzahrdPowerCell,
-                ItemID.TruffleWorm,
-                ItemID.CelestialSigil
-            };
-
-            return spawnerIds.Contains(item.netID);
-        }
-
-        private bool IsBossSpawnable(int netID)
-        {
-            if (Config.PreventIllegalBoss)
-            {
-                if (!Main.hardMode &&
-                    (netID == NPCID.QueenSlimeBoss ||
-                    netID == NPCID.TheDestroyer ||
-                    netID == NPCID.Retinazer ||
-                    netID == NPCID.Spazmatism ||
-                    netID == NPCID.SkeletronPrime ||
-                    netID == NPCID.DukeFishron))
-                {
-                    return false;
-                }
-
-                if (!NPC.downedMechBoss1 && !NPC.downedMechBoss2 && !NPC.downedMechBoss3 &&
-                    netID == NPCID.Plantera)
-                {
-                    return false;
-                }
-
-                if (!NPC.downedPlantBoss &&
-                    (netID == NPCID.HallowBoss || netID == NPCID.EmpressButterfly || netID == NPCID.Golem))
-                {
-                    return false;
-                }
-
-                if (!NPC.downedGolemBoss &&
-                    (netID == NPCID.CultistBoss || netID == NPCID.MoonLordCore))
-                {
-                    return false;
-                }
-            }
-
-            if (TShock.Utils.GetActivePlayerCount() < Config.RequiredPlayersforBoss)
-            {
-                if (!NPC.downedSlimeKing && netID == NPCID.KingSlime ||
-                    !NPC.downedBoss1 && netID == NPCID.EyeofCthulhu ||
-                    (!NPC.downedBoss2 && !WorldGen.crimson && netID == NPCID.EaterofWorldsHead) ||
-                    (!NPC.downedBoss2 && WorldGen.crimson && netID == NPCID.BrainofCthulhu) ||
-                    !NPC.downedDeerclops && netID == NPCID.Deerclops ||
-                    !NPC.downedBoss3 && netID == NPCID.SkeletronHead ||
-                    !NPC.downedQueenBee && netID == NPCID.QueenBee ||
-                    (!Main.hardMode && netID == NPCID.WallofFlesh) ||
-                    !NPC.downedQueenSlime && netID == NPCID.QueenSlimeBoss ||
-                    !NPC.downedMechBoss1 && netID == NPCID.TheDestroyer ||
-                    !NPC.downedMechBoss2 && netID == NPCID.Retinazer ||
-                    !NPC.downedMechBoss2 && netID == NPCID.Spazmatism ||
-                    !NPC.downedMechBoss3 && netID == NPCID.SkeletronPrime ||
-                    !NPC.downedPlantBoss && netID == NPCID.Plantera ||
-                    !NPC.downedGolemBoss && netID == NPCID.Golem ||
-                    !NPC.downedFishron && netID == NPCID.DukeFishron ||
-                    !NPC.downedMoonlord && netID == NPCID.MoonLordCore ||
-                    !NPC.downedAncientCultist && netID == NPCID.CultistBoss ||
-                    !NPC.downedEmpressOfLight && netID == NPCID.HallowBoss)
-                {
-                    return false;
-                }
-            }
-
-            if (!Config.AllowKingSlime && netID == NPCID.KingSlime) // King Slime
-            {
-                return false;
-            }
-
-            if (!Config.AllowEyeOfCthulhu && netID == NPCID.EyeofCthulhu) // Eye of Cthulhu
-            {
-                return false;
-            }
-
-            if (!Config.AllowEaterOfWorlds && netID == NPCID.EaterofWorldsHead) // Eater of Worlds
-            {
-                return false;
-            }
-
-            if (!Config.AllowBrainOfCthulhu && netID == NPCID.BrainofCthulhu) // Brain of Cthulhu
-            {
-                return false;
-            }
-
-            if (!Config.AllowQueenBee && netID == NPCID.QueenBee) // Queen Bee
-            {
-                return false;
-            }
-
-            if (!Config.AllowSkeletron && netID == NPCID.SkeletronHead) // Skeletron
-            {
-                return false;
-            }
-
-            if (!Config.AllowDeerclops && netID == NPCID.Deerclops) // Deerclops
-            {
-                return false;
-            }
-
-            if (!Config.AllowWallOfFlesh && netID == NPCID.WallofFlesh) // Wall of Flesh
-            {
-                return false;
-            }
-
-            if (!Config.AllowQueenSlime && netID == NPCID.QueenSlimeBoss) // Queen Slime
-            {
-                return false;
-            }
-
-            if (!Config.AllowTheTwins && (netID == NPCID.Retinazer || netID == NPCID.Spazmatism)) // The Twins
-            {
-                return false;
-            }
-
-            if (!Config.AllowTheDestroyer && netID == NPCID.TheDestroyer) // The Destroyer
-            {
-                return false;
-            }
-
-            if (!Config.AllowSkeletronPrime && netID == NPCID.SkeletronPrime) // Skeletron Prime
-            {
-                return false;
-            }
-
-            if (!Config.AllowPlantera && netID == NPCID.Plantera) // Plantera
-            {
-                return false;
-            }
-
-            if (!Config.AllowGolem && netID == NPCID.Golem) // Golem
-            {
-                return false;
-            }
-
-            if (!Config.AllowDukeFishron && netID == NPCID.DukeFishron) // Duke Fishron
-            {
-                return false;
-            }
-
-            if (!Config.AllowEmpressOfLight && netID == NPCID.HallowBoss) // Empress of Light
-            {
-                return false;
-            }
-
-            if (!Config.AllowLunaticCultist && netID == NPCID.CultistBoss) // Lunatic Cultist
-            {
-                return false;
-            }
-
-            if (!Config.AllowMoonLord && netID == NPCID.MoonLordCore) // Moon Lord
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        private int GetBossNetIDFromSpawner(int itemID)
-        {
-            return itemID switch
-            {
-                ItemID.SlimeCrown => NPCID.KingSlime,
-                ItemID.SuspiciousLookingEye => NPCID.EyeofCthulhu,
-                ItemID.WormFood => NPCID.EaterofWorldsHead,
-                ItemID.BloodySpine => NPCID.BrainofCthulhu,
-                ItemID.Abeemination => NPCID.QueenBee,
-                ItemID.DeerThing => NPCID.Deerclops,
-                ItemID.QueenSlimeCrystal => NPCID.QueenSlimeBoss,
-                ItemID.MechanicalWorm => NPCID.TheDestroyer,
-                ItemID.MechanicalEye => NPCID.Retinazer,
-                ItemID.MechanicalSkull => NPCID.SkeletronPrime,
-                ItemID.MechdusaSummon => NPCID.SkeletronPrime,
-                ItemID.LihzahrdPowerCell => NPCID.Golem,
-                ItemID.TruffleWorm => NPCID.DukeFishron,
-                ItemID.CelestialSigil => NPCID.MoonLordCore,
-                _ => 0,
-            };
+            Success,
+            IllegalSpawning,
+            NotEnoughPlayers,
+            NotAllowed
         }
     }
 }
