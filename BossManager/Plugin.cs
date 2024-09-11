@@ -1,4 +1,5 @@
 ﻿using Terraria;
+using Terraria.GameContent.Events;
 using TerrariaApi.Server;
 using TShockAPI;
 using Mono.Cecil.Cil;
@@ -378,6 +379,9 @@ namespace BossManager
                 if (NPC.downedFishron)
                     BossList.Add("Duke Fishron");
 
+                if (DD2Event.DownedInvasionT3)
+                    BossList.Add("Betsy");
+
                 if (NPC.downedEmpressOfLight)
                     BossList.Add("Empress of Light");
 
@@ -392,17 +396,26 @@ namespace BossManager
                 if (NPC.downedGoblins)
                     EventList.Add("Goblin Army");
 
+                if (DD2Event.DownedInvasionT1)
+                    EventList.Add("Old One's Army T1");
+
                 if (NPC.downedPirates)
                     EventList.Add("Pirate Invasion");
 
                 if (NPC.downedClown)
                     EventList.Add("Blood Moon");
 
+                if (DD2Event.DownedInvasionT2)
+                    EventList.Add("Old One's Army T2");
+
                 if (NPC.downedFrost)
                     EventList.Add("Frost Legion");
 
                 if (NPC.downedMartians)
                     EventList.Add("Martian Invasion");
+
+                if (DD2Event.DownedInvasionT3)
+                    EventList.Add("Old One's Army T3");
 
                 if (NPC.downedHalloweenTree)
                     EventList.Add("Pumpkin Moon");
@@ -565,6 +578,13 @@ namespace BossManager
                         return;
                     }
 
+                case "betsy":
+                    {
+                        DD2Event.DownedInvasionT3 = !DD2Event.DownedInvasionT3;
+                        args.Player.SendInfoMessage($"Set Betsy as {(DD2Event.DownedInvasionT3 ? "[c/FF0000: Killed" : "[c/00FF00: Not Killed]!")}");
+                        return;
+                    }
+
                 case "empress":
                 case "eol":
                 case "empressoflight":
@@ -676,6 +696,10 @@ namespace BossManager
                 case "fishron":
                 case "dukefishron":
                     ToggleBoss(ref Config.AllowDukeFishron, args, "Duke Fishron");
+                    return;
+
+                case "betsy":
+                    ToggleBoss(ref Config.AllowBetsy, args, "Betsy");
                     return;
 
                 case "eol":

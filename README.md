@@ -128,6 +128,9 @@ Duke Fishron
 - ` duke `
 - ` fishron `
 
+Betsy
+- ` betsy `
+
 Lunatic Cultist
 - ` lunaticcultist `
 - ` cultist `
@@ -144,4 +147,4 @@ Moonlord
 
 ----
 
-Last Tested: 10/9/2024 (Terraria 1.4.4.9)
+Last Tested: 11/9/2024 (Terraria 1.4.4.9)
