@@ -250,7 +250,7 @@ namespace BossManager
         {
             if (source is EntitySource_BossSpawn e && e.Entity is Player plr)
             {
-                TSPlayer player = new TSPlayer(plr.whoAmI);
+                TSPlayer player = TShock.Players[plr.whoAmI];
                 int itemID = GetSummoningItemFromBossNetID(npcID);
                 player.GiveItem(itemID, 1);
             }
